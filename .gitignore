@@ -1,0 +1,4 @@
+build/
+results/*/
+*.trace
+.DS_Store
