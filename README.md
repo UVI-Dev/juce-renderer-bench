@@ -96,3 +96,7 @@ process's GPU intervals in the trace).
 ## Results
 
 `results/2026-11-06-M1.md` has the numbers we got on an M1 MacBook Pro.
+
+## License
+
+MIT (see LICENSE). The apps link JUCE, which has its own license.
