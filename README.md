@@ -80,6 +80,24 @@ accessibility (no mouse), and reads the demo's own "Actual FPS" with OCR. Then
 CPU/GPU milliseconds per frame for the app and for WindowServer (GPU time is the union of each
 process's GPU intervals in the trace).
 
+### ComponentDiagnosticsDemo sweep
+
+`scripts/diagnostics_sweep.sh <DemoRunner.app> [engines...]` does the same with JUCE 9's
+ComponentDiagnosticsDemo: for each engine (CoreGraphics and Metal by default) it starts a fresh
+DemoRunner and goes through every example of the demo with an Instruments trace running, reading
+the demo's own timings with OCR. `scripts/diagnostics_analyze.py <its output dir>` prints, per
+example and engine, the demo's "total (median)" (the time spent in paint() on the message thread)
+and the CPU/GPU milliseconds per second of DemoRunner and WindowServer, then the median and mean
+over all examples.
+
+The demo's number only counts what happens on the message thread: with the CoreGraphics renderer
+the layer draws asynchronously, so paint() records the CoreGraphics calls and the rasterisation
+happens later on a Core Animation thread. Look at the process CPU/GPU columns as well.
+
+Some examples (Widgets) move a lot from one reading to the next.
+`scripts/diagnostics_ab.sh <DemoRunner.app> "<example>" [rounds]` alternates two engines on one
+example, a fresh DemoRunner each time, and prints six readings per run.
+
 ### Power
 
 - `sudo scripts/power_compare.sh [--textcache]`: CPU, GPU and combined power of the machine while
@@ -95,7 +113,7 @@ process's GPU intervals in the trace).
 
 ## Results
 
-`results/2026-11-06-M1.md` has the numbers we got on an M1 MacBook Pro.
+`results/` has the numbers we got on an M1 MacBook Pro (`2026-11-07-M1.md` for the current version of the Metal renderer).
 
 ## License
 
