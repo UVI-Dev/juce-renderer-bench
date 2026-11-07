@@ -65,8 +65,12 @@ pixels that differ by more than the threshold. Extra scenes, instead of Graphics
 | `--parity3` | circles, rounded rects, short gradients, radial gradients, oblique lines, rotated rects |
 | `--parity4` | text at every 1/20 px offset (glyph placement) |
 | `--imagestream` | images rewritten every frame next to the same picture drawn as vectors: `scripts/check_imagestream.py` |
+| `--xsnap` | a glyph at x a hair below a 1/16 px step (where CoreGraphics snaps glyph positions) |
 | `--partialstream` | one of 16 cells repainted per frame, its paint number in its colour: `scripts/check_partialstream.py` |
 | `--perf <engine>` | runs the GraphicsDemo animation on one engine and prints paint time, fps and CPU per test |
+
+`--cgmetal` captures the CoreGraphics Metal Layer renderer instead of the software one
+(`JUCE_COREGRAPHICS_RENDER_WITH_MULTIPLE_PAINT_CALLS`, what apps built with that option ship).
 
 `scripts/compare_runs.py <dir A> <dir B>` diffs two runs made with the same flags (for example
 before and after a change).

@@ -171,6 +171,30 @@ struct TwoPointGradientTest final : public Component
   }
 };
 
+// --xsnap: where CoreGraphics puts a glyph whose x is a hair below a 1/16 px step: rows of "H"
+// at device x = 400 - d, plus references at 400 and 400 - 1/16.
+struct XSnapTest final : public Component
+{
+  XSnapTest() { setOpaque (true); setSize (750, 750); }
+
+  static constexpr float deltas[] = { 0.0f, 0.0005f, 0.0006f, 0.0007f, 0.0008f, 0.00085f, 0.0009f, 0.00095f, 0.00097f,
+                                      0.00099f, 0.001f, 0.0011f, 0.0013f, 0.0015f, 0.0019f, 0.0625f };
+
+  void paint (Graphics& g) override
+  {
+    g.fillAll (Colours::white);
+    g.setColour (Colours::black);
+    const auto scale = (float) g.getInternalContext().getPhysicalPixelScaleFactor();
+
+    for (int i = 0; i < (int) std::size (deltas); ++i)
+    {
+      GlyphArrangement ga;
+      ga.addLineOfText (FontOptions (13.0f), "H", (400.0f - deltas[i]) / scale, (40.0f + 36.0f * (float) i) / scale);
+      ga.draw (g);
+    }
+  }
+};
+
 // --parity4: how CoreGraphics places a text baseline that falls between device pixels: 20 lines
 // whose baseline advances by 1/20 of a device pixel more than a whole number of pixels per line.
 struct ParityTest4 final : public Component
@@ -580,12 +604,17 @@ public:
 
     outDir.createDirectory();
 
+    if (commandLine.contains ("--cgmetal"))
+      secondEngine = "CoreGraphics Metal Layer Renderer";
+
     window = std::make_unique<DocumentWindow> ("JuceMetalCoverage", Colours::black, 0);
     window->setUsingNativeTitleBar (true);
     if (commandLine.contains ("--partialstream"))
       window->setContentOwned (demo = new PartialStreamTest(), true);
     else if (commandLine.contains ("--imagestream"))
       window->setContentOwned (demo = new ImageStreamTest(), true);
+    else if (commandLine.contains ("--xsnap"))
+      window->setContentOwned (demo = new XSnapTest(), true);
     else if (commandLine.contains ("--parity4"))
       window->setContentOwned (demo = new ParityTest4(), true);
     else if (commandLine.contains ("--parity3"))
@@ -814,7 +843,7 @@ private:
         return;
       }
 
-      case 1: captures[0] = std::exchange (pending, {}); setEngine ("Software Renderer"); return;
+      case 1: captures[0] = std::exchange (pending, {}); setEngine (secondEngine); return;
       case 2: captures[1] = std::exchange (pending, {}); setEngine ("Metal Renderer"); return;
 
       default:
@@ -828,12 +857,13 @@ private:
         const auto vsSw = compare (captures[1], captures[2], std::max (0, skipTop), threshold);
         const auto cgVsSw = compare (captures[0], captures[1], std::max (0, skipTop), threshold);
 
-        std::printf ("%-28s metal-vs-cg %6.2f%% (max %3d)   metal-vs-sw %6.2f%% (max %3d)   cg-vs-sw %6.2f%%\n",
-                     name.toRawUTF8(), vsCg.percentOver, vsCg.maxDelta, vsSw.percentOver, vsSw.maxDelta, cgVsSw.percentOver);
+        const auto second = secondEngine == "Software Renderer" ? "sw" : "cgmetal";
+        std::printf ("%-28s metal-vs-cg %6.2f%% (max %3d)   metal-vs-%s %6.2f%% (max %3d)   cg-vs-%s %6.2f%%\n",
+                     name.toRawUTF8(), vsCg.percentOver, vsCg.maxDelta, second, vsSw.percentOver, vsSw.maxDelta, second, cgVsSw.percentOver);
         std::fflush (stdout);
 
         savePng (toImage (captures[0]), outDir.getChildFile (name + "_cg.png"));
-        savePng (toImage (captures[1]), outDir.getChildFile (name + "_sw.png"));
+        savePng (toImage (captures[1]), outDir.getChildFile (name + (secondEngine == "Software Renderer" ? "_sw.png" : "_cgmetal.png")));
         savePng (toImage (captures[2]), outDir.getChildFile (name + "_metal.png"));
 
         if (vsCg.heatMap.isValid())
@@ -854,6 +884,7 @@ private:
   std::vector<int> rows;
   int numRows = 0, scenario = 0, step = 0, attempts = 0, perfEngine = -1;
   String perfEngineArg;
+  String secondEngine { "Software Renderer" }; // --cgmetal: CoreGraphics Metal Layer Renderer instead
   FrameCounter frameCounter;
   std::unique_ptr<PerfStepper> perfTimer;
   Capture captures[3], pending;
