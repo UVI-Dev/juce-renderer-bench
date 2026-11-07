@@ -24,8 +24,9 @@ endfunction()
 #   RepaintRepro_MetalLayer : JUCE_COREGRAPHICS_RENDER_WITH_MULTIPLE_PAINT_CALLS=1 (CoreGraphics
 #                             into a CAMetalLayer, one paint per dirty rect)
 #   RepaintRepro_JuceMetal  : the JUCE_METAL_RENDERER engine
+#   RepaintRepro_JuceMetalDirtyRect : the same with JUCE_METAL_RENDERER_DIRTY_RECT=1
 #   RepaintRepro_GL         : JUCE's OpenGL renderer attached to the content component
-foreach(variant CG MetalLayer JuceMetal GL)
+foreach(variant CG MetalLayer JuceMetal JuceMetalDirtyRect GL)
   set(target RepaintRepro_${variant})
   juce_add_gui_app(${target} PRODUCT_NAME ${target})
   target_sources(${target} PRIVATE repaint_repro/Main.cpp)
@@ -37,6 +38,8 @@ foreach(variant CG MetalLayer JuceMetal GL)
     target_compile_definitions(${target} PRIVATE JUCE_COREGRAPHICS_RENDER_WITH_MULTIPLE_PAINT_CALLS=1)
   elseif(variant STREQUAL "JuceMetal")
     target_compile_definitions(${target} PRIVATE JUCE_METAL_RENDERER=1)
+  elseif(variant STREQUAL "JuceMetalDirtyRect")
+    target_compile_definitions(${target} PRIVATE JUCE_METAL_RENDERER=1 JUCE_METAL_RENDERER_DIRTY_RECT=1)
   endif()
 
   if(variant STREQUAL "GL")
