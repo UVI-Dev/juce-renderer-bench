@@ -172,25 +172,35 @@ struct TwoPointGradientTest final : public Component
 };
 
 // --xsnap: where CoreGraphics puts a glyph whose x is a hair below a 1/16 px step: rows of "H"
-// at device x = 400 - d, plus references at 400 and 400 - 1/16.
+// at device x = base - d (d from 0 to 1/16 px), in four columns: base 300 px, base 1300 px, and
+// base 700 / 1000 px drawn through a 0.5x and a 2x transform (same device positions), which tells
+// whether the snapping grid is in device pixels or in user space.
 struct XSnapTest final : public Component
 {
   XSnapTest() { setOpaque (true); setSize (750, 750); }
 
-  static constexpr float deltas[] = { 0.0f, 0.0005f, 0.0006f, 0.0007f, 0.0008f, 0.00085f, 0.0009f, 0.00095f, 0.00097f,
-                                      0.00099f, 0.001f, 0.0011f, 0.0013f, 0.0015f, 0.0019f, 0.0625f };
+  static constexpr float deltas[] = { 0.0f, 0.0002f, 0.0005f, 0.0007f, 0.0009f, 0.00097f, 0.001f, 0.0011f,
+                                      0.0015f, 0.0019f, 0.002f, 0.0025f, 0.004f, 0.008f, 0.0625f };
 
   void paint (Graphics& g) override
   {
     g.fillAll (Colours::white);
     g.setColour (Colours::black);
     const auto scale = (float) g.getInternalContext().getPhysicalPixelScaleFactor();
+    const struct { float base, userScale; } columns[] = { { 300.0f, 1.0f }, { 1300.0f, 1.0f }, { 700.0f, 0.5f }, { 1000.0f, 2.0f } };
 
-    for (int i = 0; i < (int) std::size (deltas); ++i)
+    for (const auto& c : columns)
     {
-      GlyphArrangement ga;
-      ga.addLineOfText (FontOptions (13.0f), "H", (400.0f - deltas[i]) / scale, (40.0f + 36.0f * (float) i) / scale);
-      ga.draw (g);
+      const Graphics::ScopedSaveState state (g);
+      g.addTransform (AffineTransform::scale (c.userScale));
+
+      for (int i = 0; i < (int) std::size (deltas); ++i)
+      {
+        GlyphArrangement ga;
+        ga.addLineOfText (FontOptions (13.0f / c.userScale), "H", (c.base - deltas[i]) / scale / c.userScale,
+                          (40.0f + 36.0f * (float) i) / scale / c.userScale);
+        ga.draw (g);
+      }
     }
   }
 };
