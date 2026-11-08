@@ -205,6 +205,102 @@ struct XSnapTest final : public Component
   }
 };
 
+// --strokes: strokePath's joins and caps, which the Metal renderer builds on the GPU: each joint
+// style (rows) with each cap style (columns) on a zigzag of sharp, right and shallow turns, half
+// transparent (overlaps must not show); then a closed star, a path doubling back on itself (and
+// the same with rounded corners, which are curves), a dense thin waveform, a stroke under a
+// non-uniform scale and shear, and one clipped on its left.
+struct StrokeTest final : public Component
+{
+  StrokeTest() { setOpaque (true); setSize (750, 750); }
+
+  void paint (Graphics& g) override
+  {
+    g.fillAll (Colours::white);
+
+    const PathStrokeType::JointStyle joints[] { PathStrokeType::mitered, PathStrokeType::curved, PathStrokeType::beveled };
+    const PathStrokeType::EndCapStyle caps[] { PathStrokeType::butt, PathStrokeType::square, PathStrokeType::rounded };
+
+    for (int j = 0; j < 3; ++j)
+    {
+      for (int c = 0; c < 3; ++c)
+      {
+        const auto x = 30.0f + 240.0f * (float) c, y = 30.0f + 110.0f * (float) j;
+        Path zigzag;
+        zigzag.startNewSubPath (x, y + 70.0f);
+        zigzag.lineTo (x + 30.0f, y);           // sharp turn
+        zigzag.lineTo (x + 50.0f, y + 70.0f);   // right-ish turn
+        zigzag.lineTo (x + 110.0f, y + 40.0f);  // shallow turns
+        zigzag.lineTo (x + 170.0f, y + 30.0f);
+        zigzag.quadraticTo (x + 200.0f, y + 80.0f, x + 190.0f, y + 60.0f);
+        g.setColour (Colours::darkblue.withAlpha (0.5f));
+        g.strokePath (zigzag, PathStrokeType (12.0f, joints[j], caps[c]));
+        g.setColour (Colours::orangered);
+        g.strokePath (zigzag, PathStrokeType (1.0f, joints[j], caps[c]));
+      }
+    }
+
+    // Closed star, curved joints; a path that doubles back (full reversals), mitered, then with
+    // rounded corners and round joints.
+    Path star;
+    star.addStar ({ 100.0f, 450.0f }, 5, 30.0f, 70.0f);
+    g.setColour (Colours::darkgreen.withAlpha (0.6f));
+    g.strokePath (star, PathStrokeType (8.0f, PathStrokeType::curved));
+
+    Path back;
+    back.startNewSubPath (220.0f, 400.0f);
+    back.lineTo (320.0f, 400.0f);
+    back.lineTo (240.0f, 400.0f);
+    back.lineTo (300.0f, 440.0f);
+    back.lineTo (220.0f, 440.0f);
+    g.setColour (Colours::purple.withAlpha (0.6f));
+    g.strokePath (back, PathStrokeType (10.0f, PathStrokeType::mitered, PathStrokeType::square));
+    g.strokePath (back.createPathWithRoundedCorners (8.0f), PathStrokeType (6.0f, PathStrokeType::curved, PathStrokeType::rounded),
+                  AffineTransform::translation (0.0f, 90.0f));
+
+    // Dense thin waveform, 0.5 and 0.75 pt (1 and 1.5 device px at 2x).
+    for (int w = 0; w < 2; ++w)
+    {
+      Path wave;
+
+      for (int i = 0; i < 1500; ++i)
+      {
+        const auto t = (float) i / 1499.0f;
+        const auto px = 360.0f + 360.0f * t;
+        const auto py = 400.0f + 40.0f * (float) w + 15.0f * (std::sin (t * 40.0f) * 0.7f + 0.3f * std::sin (t * 547.0f + (float) i));
+        i == 0 ? wave.startNewSubPath (px, py) : wave.lineTo (px, py);
+      }
+
+      g.setColour (Colours::black);
+      g.strokePath (wave, PathStrokeType (w == 0 ? 0.5f : 0.75f));
+    }
+
+    // Non-uniform scale and shear; a stroke cut by a clip on its left.
+    {
+      Graphics::ScopedSaveState s (g);
+      g.addTransform (AffineTransform::scale (2.0f, 0.6f).sheared (0.4f, 0.0f).translated (40.0f, 600.0f));
+      Path p;
+      p.startNewSubPath (0.0f, 0.0f);
+      p.lineTo (40.0f, 150.0f);
+      p.lineTo (80.0f, 20.0f);
+      p.lineTo (120.0f, 140.0f);
+      g.setColour (Colours::teal.withAlpha (0.7f));
+      g.strokePath (p, PathStrokeType (10.0f, PathStrokeType::curved, PathStrokeType::rounded));
+    }
+    {
+      Graphics::ScopedSaveState s (g);
+      g.reduceClipRegion (520, 540, 200, 180);
+      Path p;
+      p.startNewSubPath (420.0f, 700.0f);
+      p.lineTo (560.0f, 560.0f);
+      p.lineTo (600.0f, 690.0f);
+      p.lineTo (700.0f, 580.0f);
+      g.setColour (Colours::brown.withAlpha (0.7f));
+      g.strokePath (p, PathStrokeType (14.0f, PathStrokeType::mitered, PathStrokeType::butt));
+    }
+  }
+};
+
 // --parity4: how CoreGraphics places a text baseline that falls between device pixels: 20 lines
 // whose baseline advances by 1/20 of a device pixel more than a whole number of pixels per line.
 struct ParityTest4 final : public Component
@@ -625,6 +721,8 @@ public:
       window->setContentOwned (demo = new ImageStreamTest(), true);
     else if (commandLine.contains ("--xsnap"))
       window->setContentOwned (demo = new XSnapTest(), true);
+    else if (commandLine.contains ("--strokes"))
+      window->setContentOwned (demo = new StrokeTest(), true);
     else if (commandLine.contains ("--parity4"))
       window->setContentOwned (demo = new ParityTest4(), true);
     else if (commandLine.contains ("--parity3"))

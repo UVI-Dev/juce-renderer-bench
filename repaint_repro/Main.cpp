@@ -5,10 +5,16 @@
 // "spots" scattered over the window that call repaint() on every vblank. Ideally only the
 // spots (and the background under them) are painted; every cell paint is pure overdraw.
 //
-// Usage: RepaintRepro --spots N [--seconds S] [--lattice] [--full] [--textcache] [--software] [--label text]
+// Usage: RepaintRepro --spots N [--seconds S] [--lattice] [--full] [--textcache] [--software] [--background] [--label text]
 //   default layout: 4 corners first, then random; --lattice: non-touching spots (N separate rects)
+// RepaintRepro --polyline N [--lines K] [--fill] [--stroke W] [--joint mitered|curved|beveled]
+//   [--cap butt|square|rounded] [--closed] [--curves] [--rotate]: a scope (1320 x 400, opaque)
+//   that strokes K polylines of N points each on every vblank, like a waveform, spectrum or
+//   modulation history view (--fill: also fills the area under each one); no spots unless --spots.
 // Prints one line of stats, then checks that the on-screen pixels match a full repaint
 // (catches a paint path that leaves stale or cleared pixels outside the dirty rects), and quits.
+// That check needs --background (a foreground app can't capture its window); REPRO_DUMP_DIR=dir
+// also saves both captures as PNGs.
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #if REPRO_GL
@@ -68,10 +74,12 @@ struct Stats
   int64 passes = 0;       // top-level paint traversals (one per drawRect, or one per rect with the metal renderer)
   int64 cellPaints = 0;   // cells never change: each paint is overdraw
   int64 spotPaints = 0;
+  int64 scopePaints = 0;
   double paintedArea = 0; // sum of clip-bounds area over passes, in points^2
   double dirtyArea = 0;   // area actually requested through repaint()
   double paintSeconds = 0;
   double frameAccum = 0;
+  bool inContentPass = false; // Content's paint pass is timing its children (Scope included)
   std::vector<double> perFramePaintMs;
 };
 
@@ -143,6 +151,124 @@ private:
   int phase = 0;
 };
 
+// --polyline: K polylines of N points across the scope, moving every frame. The stroke style
+// options (--joint, --cap, --closed, --curves, --rotate) exercise the other outline cases.
+struct ScopeStyle
+{
+  int points = 0, lines = 1;
+  bool fill = false;
+  float width = 1.5f;
+  juce::PathStrokeType::JointStyle joint = juce::PathStrokeType::mitered;
+  juce::PathStrokeType::EndCapStyle cap = juce::PathStrokeType::butt;
+  bool closed = false, curves = false, rotate = false;
+};
+
+class Scope final : public juce::Component
+{
+public:
+  explicit Scope (const ScopeStyle& s) : style (s)
+  {
+    setOpaque (true);
+
+    // The wave's phases, so that a frame costs no sin(): sin (b + d) from sin b and cos b.
+    for (int l = 0; l < style.lines; ++l)
+      for (int i = 0; i < style.points; ++i)
+      {
+        const auto t = (float) i / (float) (style.points - 1);
+        const auto a = t * 40.0f + (float) l;
+        const auto fast = a * 13.7f + (float) i;
+        waves.push_back ({ std::sin (a), std::cos (a), std::sin (fast), std::cos (fast) });
+      }
+
+    paths.resize ((size_t) style.lines);
+    areas.resize ((size_t) style.lines);
+  }
+
+  void tick() noexcept { ++phase; }
+
+  void paint (juce::Graphics& g) override
+  {
+    if (stats.measuring)
+      ++stats.scopePaints;
+
+    // The scope is opaque, so its repaints don't go through Content's timed pass: timed here.
+    const auto start = nowSeconds();
+    paintScope (g);
+
+    if (stats.measuring && ! stats.inContentPass)
+    {
+      const auto dt = nowSeconds() - start;
+      stats.paintSeconds += dt;
+      stats.frameAccum += dt;
+    }
+  }
+
+private:
+  void paintScope (juce::Graphics& g)
+  {
+    g.fillAll (juce::Colour (0xff181c20));
+    const auto w = (float) getWidth(), h = (float) getHeight();
+    const auto band = h / (float) style.lines;
+    const auto d = (float) phase * 0.07f;
+    const auto sinD = std::sin (d), cosD = std::cos (d), sinFastD = std::sin (d * 13.7f), cosFastD = std::cos (d * 13.7f);
+    const auto transform = style.rotate ? juce::AffineTransform::rotation (0.05f, w * 0.5f, h * 0.5f) : juce::AffineTransform();
+
+    for (int l = 0; l < style.lines; ++l)
+    {
+      auto& p = paths[(size_t) l];
+      p.clear();
+      p.preallocateSpace (3 * style.points + 8);
+      const auto mid = band * ((float) l + 0.5f);
+      const auto amp = band * 0.4f;
+      const auto* wave = waves.data() + (size_t) (l * style.points);
+
+      for (int i = 0; i < style.points; ++i)
+      {
+        // A smooth wave plus a fast wiggle: dense, irregular, like a waveform or a spectrum.
+        const auto& v = wave[i];
+        const auto y = mid + amp * (0.7f * (v.sinA * cosD + v.cosA * sinD) + 0.3f * (v.sinFast * cosFastD + v.cosFast * sinFastD));
+        const auto x = (float) i / (float) (style.points - 1) * w;
+
+        if (i == 0)
+          p.startNewSubPath (x, y);
+        else if (style.curves && (i & 1) == 0)
+          p.quadraticTo (p.getCurrentPosition().x, mid, x, y);
+        else
+          p.lineTo (x, y);
+      }
+
+      const auto colour = juce::Colour::fromHSV ((float) l / (float) style.lines, 0.6f, 1.0f, 1.0f);
+
+      if (style.fill)
+      {
+        // The area under the open wave, built alongside it rather than copied.
+        auto& area = areas[(size_t) l];
+        area.clear();
+        area.preallocateSpace (3 * style.points + 16);
+        area.addPath (p);
+        area.lineTo (w, mid + amp);
+        area.lineTo (0.0f, mid + amp);
+        area.closeSubPath();
+        g.setColour (colour.withAlpha (0.25f));
+        g.fillPath (area, transform);
+      }
+
+      if (style.closed)
+        p.closeSubPath();
+
+      g.setColour (colour);
+      g.strokePath (p, juce::PathStrokeType (style.width, style.joint, style.cap), transform);
+    }
+  }
+
+  struct Wave { float sinA, cosA, sinFast, cosFast; };
+
+  const ScopeStyle style;
+  std::vector<Wave> waves;
+  std::vector<juce::Path> paths, areas;
+  int phase = 0;
+};
+
 class Content final : public juce::Component
 {
 public:
@@ -179,6 +305,7 @@ public:
   void paint (juce::Graphics& g) override
   {
     passStart = nowSeconds();
+    stats.inContentPass = true;
 
     if (stats.measuring)
     {
@@ -199,12 +326,21 @@ public:
     }
 
     passStart = 0;
+    stats.inContentPass = false;
   }
 
   bool animate = true;
   bool recordDirty = false;            // GPU target: no peer, the renderer consumes this list
   juce::RectangleList<int> pendingDirty;
   bool fullRepaint = false; // --full: whole window every frame (page switch / resize cost)
+  std::unique_ptr<Scope> scope; // --polyline
+
+  void addScope (const ScopeStyle& style)
+  {
+    scope = std::make_unique<Scope> (style);
+    scope->setBounds (40, 40, windowW - 80, 400);
+    addAndMakeVisible (*scope);
+  }
 
   void onVBlank()
   {
@@ -221,6 +357,9 @@ public:
       ++stats.frames;
     }
 
+    if (scope != nullptr)
+      scope->tick();
+
     if (fullRepaint)
     {
       repaint();
@@ -232,6 +371,17 @@ public:
         stats.dirtyArea += (double) windowW * windowH;
 
       return;
+    }
+
+    if (scope != nullptr)
+    {
+      scope->repaint();
+
+      if (recordDirty)
+        pendingDirty.add (scope->getBounds());
+
+      if (stats.measuring)
+        stats.dirtyArea += (double) scope->getWidth() * scope->getHeight();
     }
 
     for (auto& s : spots)
@@ -256,7 +406,7 @@ private:
 class MainWindow final : public juce::DocumentWindow
 {
 public:
-  MainWindow (int numSpots, bool software, bool lattice)
+  MainWindow (int numSpots, bool software, bool lattice, bool foreground)
     : DocumentWindow ("RepaintRepro", juce::Colours::black, 0)
   {
     setUsingNativeTitleBar (true);
@@ -265,8 +415,13 @@ public:
     setVisible (true);
 
     // Measure in the foreground: background apps get App Nap, timer coalescing and lower QoS.
-    juce::Process::makeForegroundProcess();
-    toFront (true);
+    // But a process made a foreground app loses the window-capture access it inherits from the
+    // shell, so the pixel check needs --background (and its timings don't count).
+    if (foreground)
+    {
+      juce::Process::makeForegroundProcess();
+      toFront (true);
+    }
 
     if (software)
       if (auto* peer = getPeer())
@@ -363,15 +518,59 @@ public:
       return i >= 0 && i + 1 < args.size() ? args[i + 1] : def;
     };
 
-    numSpots = argValue ("--spots", "2").getIntValue();
+    // --polyline: the scope alone, unless --spots asks for spots too.
+    const auto polyline = args.contains ("--polyline");
+    numSpots = argValue ("--spots", polyline ? "0" : "2").getIntValue();
     seconds = argValue ("--seconds", "5").getDoubleValue();
     label = argValue ("--label", "");
     software = args.contains ("--software");
     const auto lattice = args.contains ("--lattice");
     cacheTextPerCell = args.contains ("--textcache");
 
-    window = std::make_unique<MainWindow> (numSpots, software, lattice);
+    window = std::make_unique<MainWindow> (numSpots, software, lattice, ! args.contains ("--background"));
     window->content->fullRepaint = args.contains ("--full");
+
+    if (polyline)
+    {
+      const auto joint = argValue ("--joint", "mitered"), cap = argValue ("--cap", "butt");
+      ScopeStyle style;
+      style.points = argValue ("--polyline", "0").getIntValue();
+      style.lines = argValue ("--lines", "1").getIntValue();
+      style.width = argValue ("--stroke", "1.5").getFloatValue();
+      style.fill = args.contains ("--fill");
+      style.closed = args.contains ("--closed");
+      style.curves = args.contains ("--curves");
+      style.rotate = args.contains ("--rotate");
+      style.joint = joint == "curved" ? juce::PathStrokeType::curved
+                  : joint == "beveled" ? juce::PathStrokeType::beveled : juce::PathStrokeType::mitered;
+      style.cap = cap == "square" ? juce::PathStrokeType::square
+                : cap == "rounded" ? juce::PathStrokeType::rounded : juce::PathStrokeType::butt;
+
+      const auto fail = [this] (const char* message)
+      {
+        std::fprintf (stderr, "RepaintRepro: %s\n", message);
+        setApplicationReturnValue (1);
+        quit();
+      };
+
+      if (style.points < 2)
+        return fail ("--polyline needs at least 2 points");
+      if (style.lines < 1)
+        return fail ("--lines needs at least 1 line");
+      if (! (style.width > 0.0f))
+        return fail ("--stroke needs a width > 0");
+      if (! juce::StringArray { "mitered", "curved", "beveled" }.contains (joint))
+        return fail ("--joint: mitered, curved or beveled");
+      if (! juce::StringArray { "butt", "square", "rounded" }.contains (cap))
+        return fail ("--cap: butt, square or rounded");
+
+      scopeDescription = juce::String::formatted (" scope=%dx%d stroke=%.2f %s/%s%s%s%s%s", style.points, style.lines,
+                                                  (double) style.width, joint.toRawUTF8(), cap.toRawUTF8(),
+                                                  style.fill ? " fill" : "", style.closed ? " closed" : "",
+                                                  style.curves ? " curves" : "", style.rotate ? " rotate" : "");
+      window->content->addScope (style);
+    }
+
     startTimer (1000); // warm-up: first frames repaint everything
   }
 
@@ -478,14 +677,15 @@ private:
     const auto mean = ms.empty() ? 0.0 : stats.paintSeconds * 1000.0 / (double) ms.size();
 
     auto line = juce::String::formatted (
-      "%-14s spots=%3d fps=%5.1f passes/frame=%5.2f cellPaints/frame=%7.1f spotPaints/frame=%5.1f "
+      "%-14s spots=%3d fps=%5.1f passes/frame=%5.2f cellPaints/frame=%7.1f spotPaints/frame=%5.1f scopePaints/frame=%5.1f "
       "paintedArea/dirtyArea=%7.1fx paintMs/frame mean=%6.3f p50=%6.3f p95=%6.3f max=%6.3f "
-      "mainCPU=%5.1f%% procCPU=%5.1f%%",
+      "mainCPU=%5.1f%% procCPU=%5.1f%%%s",
       label.toRawUTF8(), numSpots, (double) stats.frames / wall,
       (double) stats.passes / frames, (double) stats.cellPaints / frames, (double) stats.spotPaints / frames,
+      (double) stats.scopePaints / frames,
       stats.dirtyArea > 0 ? stats.paintedArea / stats.dirtyArea : 0.0,
       mean, pct (0.5), pct (0.95), ms.empty() ? 0.0 : ms.back(),
-      100.0 * mainCpu / wall, 100.0 * cpu / wall);
+      100.0 * mainCpu / wall, 100.0 * cpu / wall, scopeDescription.toRawUTF8());
 
 
     std::printf ("%s\n", line.toRawUTF8());
@@ -496,7 +696,7 @@ private:
   int numSpots = 2;
   double seconds = 5.0;
   bool software = false;
-  juce::String label;
+  juce::String label, scopeDescription;
   double t0 = 0, cpu0 = 0, mainCpu0 = 0;
   int phase = 0, capW = 0, capH = 0;
   std::vector<uint32_t> partial;

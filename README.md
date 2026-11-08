@@ -31,6 +31,11 @@ pixels on screen match a full repaint (stale or cleared pixels outside the dirty
 build/RepaintRepro_<variant>_artefacts/Release/RepaintRepro_<variant>.app/Contents/MacOS/RepaintRepro_<variant> --spots 2 [--full] [--textcache] [--seconds 6]
 ```
 
+`--polyline N [--lines K] [--fill] [--stroke W] [--joint mitered|curved|beveled] [--cap butt|square|rounded] [--closed] [--curves] [--rotate]`
+replaces the spots with a scope (1320 x 400) that strokes K moving polylines of N points every
+frame, like a waveform, spectrum or modulation history; the stats line then describes it
+(`scope=...`) and counts its paints (`scopePaints/frame`).
+
 | Variant | Paint path |
 |---|---|
 | `CG` | JUCE's default CoreGraphics path (AppKit merges the dirty rects into one bounding box) |
@@ -64,6 +69,7 @@ pixels that differ by more than the threshold. Extra scenes, instead of Graphics
 | `--parity2` | non-uniform scales and shears, rotated and single-channel images, stretched text |
 | `--parity3` | circles, rounded rects, short gradients, radial gradients, oblique lines, rotated rects |
 | `--parity4` | text at every 1/20 px offset (glyph placement) |
+| `--strokes` | strokePath joins and caps (each joint style with each cap), closed, doubling back, curves, dense thin waveform, non-uniform transform, clipped |
 | `--imagestream` | images rewritten every frame next to the same picture drawn as vectors: `scripts/check_imagestream.py` |
 | `--xsnap` | a glyph at x a hair below a 1/16 px step, at two x and under 0.5x and 2x transforms (where CoreGraphics snaps glyph positions) |
 | `--partialstream` | one of 16 cells repainted per frame, its paint number in its colour: `scripts/check_partialstream.py` |
