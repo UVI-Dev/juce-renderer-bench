@@ -171,6 +171,41 @@ struct TwoPointGradientTest final : public Component
   }
 };
 
+// --alphagrad: gradients with alpha over a neutral grey background, so that the window server's
+// colour matching leaves the captured values unchanged and the dither of each engine can be
+// measured exactly (forum 41069: a gradient fading to transparent showed banding). Columns,
+// 100 x 680 pt: 0: opaque grey 0x30 -> 0x38 (a long low-contrast ramp), 1: white 0.3 -> 0,
+// 2: black 0.6 -> 0, 3: grey 0x80, alpha 1 -> 0, 4: transparent white -> opaque white,
+// 5: radial white 0.5 -> 0.
+struct AlphaGradientTest final : public Component
+{
+  AlphaGradientTest() { setOpaque (true); setSize (750, 750); }
+
+  void paint (Graphics& g) override
+  {
+    g.fillAll (Colour (0xff404040));
+    const float top = 30.0f, h = 680.0f, w = 100.0f;
+
+    auto column = [&] (int i, Colour c0, Colour c1)
+    {
+      const auto x = 20.0f + (float) i * 120.0f;
+      g.setGradientFill (ColourGradient (c0, x, top, c1, x, top + h, false));
+      g.fillRect (x, top, w, h);
+    };
+
+    column (0, Colour (0xff303030), Colour (0xff383838));
+    column (1, Colours::white.withAlpha (0.3f), Colours::white.withAlpha (0.0f));
+    column (2, Colours::black.withAlpha (0.6f), Colours::black.withAlpha (0.0f));
+    column (3, Colour (0xff808080), Colour (0x00808080));
+    column (4, Colours::white.withAlpha (0.0f), Colours::white);
+
+    const auto x5 = 20.0f + 5.0f * 120.0f;
+    g.setGradientFill (ColourGradient (Colours::white.withAlpha (0.5f), x5 + w * 0.5f, top + h * 0.5f,
+                                       Colours::white.withAlpha (0.0f), x5 + w * 0.5f, top + h * 0.5f + 300.0f, true));
+    g.fillRect (x5, top, w, h);
+  }
+};
+
 // --xsnap: where CoreGraphics puts a glyph whose x is a hair below a 1/16 px step: rows of "H"
 // at device x = base - d (d from 0 to 1/16 px), in four columns: base 300 px, base 1300 px, and
 // base 700 / 1000 px drawn through a 0.5x and a 2x transform (same device positions), which tells
@@ -719,6 +754,8 @@ public:
       window->setContentOwned (demo = new PartialStreamTest(), true);
     else if (commandLine.contains ("--imagestream"))
       window->setContentOwned (demo = new ImageStreamTest(), true);
+    else if (commandLine.contains ("--alphagrad"))
+      window->setContentOwned (demo = new AlphaGradientTest(), true);
     else if (commandLine.contains ("--xsnap"))
       window->setContentOwned (demo = new XSnapTest(), true);
     else if (commandLine.contains ("--strokes"))
